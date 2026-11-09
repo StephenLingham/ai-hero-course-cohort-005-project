@@ -2724,8 +2724,8 @@ This course is still in draft while the cluster examples are rewritten against t
     []
   );
 
-  // ─── Liam's Refund ───
-  // One learner with a Refund waiting on an admin. The dates count back from
+  // ─── Liam's refund request ───
+  // One learner with a refund request waiting on an admin. The dates count back from
   // today, so the fourteen-day refund window is still open whenever you seed.
 
   const liam = studentByEmail("liam@example.com");
@@ -2781,7 +2781,7 @@ This course is still in draft while the cluster examples are rewritten against t
     })
     .run();
 
-  console.log("Created Liam's Refund.");
+  console.log("Created Liam's refund request.");
 
   // ─── Flush watch events ───
   // Batched: the heartbeat makes these by far the largest table, and one

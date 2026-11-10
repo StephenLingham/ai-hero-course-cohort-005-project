@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
-import { LessonProgressStatus, RefundStatus, UserRole } from "~/db/schema";
+import { LessonProgressStatus, RefundRequestStatus, UserRole } from "~/db/schema";
 import {
   approveRefundRequest,
   checkRefundRequest,
   declineRefundRequest,
-  getRefundOffer,
+  getRefundRequestOffer,
   getSeatAvailability,
   listRefundRequestsForBuyer,
   listRefundRequestsForReview,
@@ -36,7 +36,7 @@ beforeEach(() => {
 
   platformAdmin = db
     .insert(schema.users)
-    .values({ name: "Pat Admin", email: "pat@example.com", role: UserRole.Admin })
+    .values({ name: "Pat Admin", email: "pat@example.com", role: UserRole.PlatformAdmin })
     .returning()
     .get();
 
@@ -99,7 +99,7 @@ function buySeats(userId: number, seats: number, daysAgo = 3) {
     .get();
   const seatRows = Array.from({ length: seats }, (_, i) =>
     db
-      .insert(schema.coupons)
+      .insert(schema.seats)
       .values({
         teamId: team.id,
         courseId: base.course.id,
@@ -113,9 +113,9 @@ function buySeats(userId: number, seats: number, daysAgo = 3) {
 }
 
 function claimSeat(seatId: number, userId: number) {
-  db.update(schema.coupons)
-    .set({ redeemedByUserId: userId, redeemedAt: daysBefore(1) })
-    .where(eq(schema.coupons.id, seatId))
+  db.update(schema.seats)
+    .set({ claimedByUserId: userId, claimedAt: daysBefore(1) })
+    .where(eq(schema.seats.id, seatId))
     .run();
   db.insert(schema.enrollments)
     .values({ userId, courseId: base.course.id })
@@ -150,8 +150,8 @@ function raise(purchaseId: number, buyerId: number) {
 function getSeat(seatId: number) {
   const seat = db
     .select()
-    .from(schema.coupons)
-    .where(eq(schema.coupons.id, seatId))
+    .from(schema.seats)
+    .where(eq(schema.seats.id, seatId))
     .get();
   if (!seat) throw new Error("Seat not found");
   return seat;
@@ -164,6 +164,18 @@ describe("raising a Refund Request", () => {
     const result = raiseRefundRequest(db, purchase.id, base.user.id, "Nope.", NOW);
 
     expect(result).toMatchObject({ ok: true, kind: "individual_purchase" });
+  });
+
+  it("acknowledges a request without promising approval or a money transfer", () => {
+    const purchase = buyForSelf(base.user.id);
+
+    const result = raiseRefundRequest(db, purchase.id, base.user.id, "Nope.", NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.email.subject).toBe("Refund request received — Test Course");
+    expect(result.email.body).toContain("Your request is for $79.00");
+    expect(result.email.body).toContain("A Platform Admin will approve or decline");
+    expect(result.email.body).not.toContain("on its way");
   });
 
   it("refuses anyone but the buyer", () => {
@@ -225,6 +237,26 @@ describe("raising a Refund Request", () => {
     );
   });
 
+  it("does not count an opened lesson as video watched", () => {
+    const purchase = buyForSelf(base.user.id);
+    db.insert(schema.lessonProgress)
+      .values({
+        userId: base.user.id,
+        lessonId: lessonIds[0],
+        status: LessonProgressStatus.InProgress,
+      })
+      .run();
+    raise(purchase.id, base.user.id);
+
+    const [request] = listRefundRequestsForReview(db, RefundRequestStatus.Open, NOW);
+
+    expect(request.figures).toMatchObject({
+      kind: "individual_purchase",
+      secondsWatched: 0,
+      lessonsCompleted: 0,
+    });
+  });
+
   it("refuses a Team Licence with a Claimed Seat", () => {
     const teamAdmin = addLearner("Priya");
     const { purchase, seats } = buySeats(teamAdmin.id, 3);
@@ -242,18 +274,18 @@ describe("the refund offer on the course page", () => {
     const individual = buyForSelf(base.user.id, 3);
     buySeats(base.user.id, 5, 1);
 
-    expect(getRefundOffer(db, base.user.id, base.course.id, NOW)).toMatchObject({
+    expect(getRefundRequestOffer(db, base.user.id, base.course.id, NOW)).toMatchObject({
       purchaseId: individual.id,
       amount: 7900,
     });
   });
 
-  it("offers nothing once the purchase has been refunded", () => {
+  it("offers nothing once a refund request for the purchase has been approved", () => {
     const purchase = buyForSelf(base.user.id);
     const id = raise(purchase.id, base.user.id);
     approveRefundRequest(db, id, platformAdmin.id, null, NOW);
 
-    expect(getRefundOffer(db, base.user.id, base.course.id, NOW)).toBeNull();
+    expect(getRefundRequestOffer(db, base.user.id, base.course.id, NOW)).toBeNull();
   });
 });
 
@@ -283,11 +315,11 @@ describe("approving a Refund Request", () => {
 
     const refundRequest = db
       .select()
-      .from(schema.refunds)
-      .where(eq(schema.refunds.id, id))
+      .from(schema.refundRequests)
+      .where(eq(schema.refundRequests.id, id))
       .get();
     expect(refundRequest).toMatchObject({
-      status: RefundStatus.Approved,
+      status: RefundRequestStatus.Approved,
       amountRefunded: 7900,
       resolvedByUserId: platformAdmin.id,
     });
@@ -324,7 +356,7 @@ describe("approving a Refund Request", () => {
 
     expect(result.ok).toBe(true);
     for (const seat of seats) {
-      expect(getSeatAvailability(db, getSeat(seat.id))).toBe("refunded");
+      expect(getSeatAvailability(db, getSeat(seat.id))).toBe("refund_approved");
     }
   });
 
@@ -356,7 +388,7 @@ describe("approving a Refund Request", () => {
     });
   });
 
-  it("emails the buyer that the refund is on its way", () => {
+  it("emails the approval decision without claiming a confirmed money transfer", () => {
     const purchase = buyForSelf(base.user.id);
     const id = raise(purchase.id, base.user.id);
 
@@ -364,8 +396,9 @@ describe("approving a Refund Request", () => {
 
     if (!result.ok) throw new Error(result.error);
     expect(result.email.to).toBe("test@example.com");
-    expect(result.email.subject).toBe("Refund approved — Test Course");
-    expect(result.email.body).toContain("$79.00");
+    expect(result.email.subject).toBe("Refund request approved — Test Course");
+    expect(result.email.body).toContain("Your approved refund amount is $79.00");
+    expect(result.email.body).not.toContain("on its way");
   });
 });
 
@@ -393,6 +426,8 @@ describe("declining a Refund Request", () => {
     );
 
     if (!result.ok) throw new Error(result.error);
+    expect(result.email.subject).toBe("Refund request declined — Test Course");
+    expect(result.email.body).toContain("declined your refund request");
     expect(result.email.body).toContain("You finished the course.");
     expect(isEnrolled(base.user.id)).toBe(true);
     expect(checkRefundRequest(db, purchase.id, base.user.id, NOW).ok).toBe(true);
@@ -425,7 +460,7 @@ describe("listing Refund Requests", () => {
       )
       .run();
 
-    const [row] = listRefundRequestsForReview(db, RefundStatus.Open, NOW);
+    const [row] = listRefundRequestsForReview(db, RefundRequestStatus.Open, NOW);
 
     expect(row).toMatchObject({
       id,
@@ -446,7 +481,7 @@ describe("listing Refund Requests", () => {
     const { purchase } = buySeats(priya.id, 3);
     raise(purchase.id, priya.id);
 
-    const [row] = listRefundRequestsForReview(db, RefundStatus.Open, NOW);
+    const [row] = listRefundRequestsForReview(db, RefundRequestStatus.Open, NOW);
 
     expect(row.figures).toEqual({
       kind: "team_licence",
@@ -470,13 +505,13 @@ describe("listing Refund Requests", () => {
     if (!secondId.ok) throw new Error(secondId.error);
 
     expect(
-      listRefundRequestsForReview(db, RefundStatus.Open, NOW).map((r) => r.id)
+      listRefundRequestsForReview(db, RefundRequestStatus.Open, NOW).map((r) => r.id)
     ).toEqual([firstId, secondId.refundRequestId]);
 
     approveRefundRequest(db, firstId, platformAdmin.id, null, NOW);
 
     expect(
-      listRefundRequestsForReview(db, RefundStatus.Approved, NOW)
+      listRefundRequestsForReview(db, RefundRequestStatus.Approved, NOW)
     ).toMatchObject([{ id: firstId, decidedByName: "Pat Admin" }]);
   });
 
@@ -486,7 +521,7 @@ describe("listing Refund Requests", () => {
     declineRefundRequest(db, id, platformAdmin.id, "Past half way.", NOW);
 
     expect(listRefundRequestsForBuyer(db, base.user.id)).toMatchObject([
-      { id, status: RefundStatus.Declined, decisionNote: "Past half way." },
+      { id, status: RefundRequestStatus.Declined, decisionNote: "Past half way." },
     ]);
   });
 

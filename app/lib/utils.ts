@@ -1,5 +1,12 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { UserRole } from "~/db/schema";
+
+export const USER_ROLE_LABELS: Record<UserRole, string> = {
+  student: "Student",
+  instructor: "Instructor",
+  admin: "Platform Admin",
+};
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

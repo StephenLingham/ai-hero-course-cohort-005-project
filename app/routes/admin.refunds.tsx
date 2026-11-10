@@ -3,11 +3,10 @@ import { useFetcher, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { Route } from "./+types/admin.refunds";
-import { getCurrentUserId } from "~/lib/session";
+import { requirePlatformAdmin } from "~/lib/access.server";
 import { parseFormData } from "~/lib/validation";
-import { RefundStatus, UserRole, users } from "~/db/schema";
+import { RefundRequestStatus } from "~/db/schema";
 import { db } from "~/db";
-import { eq } from "drizzle-orm";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";
@@ -22,11 +21,11 @@ import {
 } from "~/lib/refunds.server";
 import { RULE_BREAK_LABELS } from "~/lib/refund-rules";
 
-const refundFilterSchema = z
-  .nativeEnum(RefundStatus)
-  .catch(RefundStatus.Open);
+const refundRequestFilterSchema = z
+  .nativeEnum(RefundRequestStatus)
+  .catch(RefundRequestStatus.Open);
 
-const adminRefundActionSchema = z.discriminatedUnion("intent", [
+const refundRequestDecisionSchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("approve"),
     refundRequestId: z.coerce.number().int(),
@@ -47,31 +46,6 @@ const adminRefundActionSchema = z.discriminatedUnion("intent", [
   }),
 ]);
 
-function getUserById(id: number) {
-  return db.select().from(users).where(eq(users.id, id)).get();
-}
-
-/** Only a Platform Admin decides Refund Requests. */
-async function requirePlatformAdmin(request: Request) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("Select a user from the DevUI panel to review refunds.", {
-      status: 401,
-    });
-  }
-
-  const currentUser = getUserById(currentUserId);
-
-  if (!currentUser || currentUser.role !== UserRole.Admin) {
-    throw data("Only Platform Admins can review refund requests.", {
-      status: 403,
-    });
-  }
-
-  return currentUser;
-}
-
 export function meta() {
   return [
     { title: "Refund Requests — Cadence" },
@@ -82,7 +56,7 @@ export function meta() {
 export async function loader({ request, url }: Route.LoaderArgs) {
   await requirePlatformAdmin(request);
 
-  const status = refundFilterSchema.parse(url.searchParams.get("status"));
+  const status = refundRequestFilterSchema.parse(url.searchParams.get("status"));
 
   return {
     status,
@@ -94,7 +68,7 @@ export async function action({ request }: Route.ActionArgs) {
   const platformAdmin = await requirePlatformAdmin(request);
 
   const formData = await request.formData();
-  const parsed = parseFormData(formData, adminRefundActionSchema);
+  const parsed = parseFormData(formData, refundRequestDecisionSchema);
 
   if (!parsed.success) {
     return data(
@@ -139,13 +113,13 @@ export async function action({ request }: Route.ActionArgs) {
   };
 }
 
-const FILTERS: { status: RefundStatus; label: string }[] = [
-  { status: RefundStatus.Open, label: "Open" },
-  { status: RefundStatus.Approved, label: "Approved" },
-  { status: RefundStatus.Declined, label: "Declined" },
+const FILTERS: { status: RefundRequestStatus; label: string }[] = [
+  { status: RefundRequestStatus.Open, label: "Open" },
+  { status: RefundRequestStatus.Approved, label: "Approved" },
+  { status: RefundRequestStatus.Declined, label: "Declined" },
 ];
 
-export default function AdminRefunds({ loaderData }: Route.ComponentProps) {
+export default function AdminRefundRequests({ loaderData }: Route.ComponentProps) {
   const { status, refundRequests } = loaderData;
   const [, setSearchParams] = useSearchParams();
 
@@ -174,7 +148,7 @@ export default function AdminRefunds({ loaderData }: Route.ComponentProps) {
             size="sm"
             onClick={() =>
               setSearchParams(
-                filter.status === RefundStatus.Open
+                filter.status === RefundRequestStatus.Open
                   ? {}
                   : { status: filter.status }
               )
@@ -270,7 +244,7 @@ function RefundRequestCard({
   >();
   const [note, setNote] = useState("");
   const isSubmitting = fetcher.state !== "idle";
-  const isOpen = refundRequest.status === RefundStatus.Open;
+  const isOpen = refundRequest.status === RefundRequestStatus.Open;
 
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data) return;
@@ -359,7 +333,7 @@ function RefundRequestCard({
           </div>
         ) : (
           <div className="border-t pt-4 text-sm text-muted-foreground">
-            {refundRequest.status === RefundStatus.Approved
+            {refundRequest.status === RefundRequestStatus.Approved
               ? "Approved"
               : "Declined"}
             {refundRequest.decidedByName &&

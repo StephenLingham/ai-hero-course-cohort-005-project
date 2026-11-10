@@ -11,7 +11,7 @@ import {
 export enum UserRole {
   Student = "student",
   Instructor = "instructor",
-  Admin = "admin",
+  PlatformAdmin = "admin",
 }
 
 export enum CourseStatus {
@@ -31,14 +31,14 @@ export enum QuestionType {
   TrueFalse = "true_false",
 }
 
-export enum RefundStatus {
+export enum RefundRequestStatus {
   Open = "open",
   Approved = "approved",
   Declined = "declined",
 }
 
 export enum TeamMemberRole {
-  Admin = "admin",
+  TeamAdmin = "admin",
   Member = "member",
 }
 
@@ -229,7 +229,7 @@ export const purchases = sqliteTable(
   (table) => [index("purchases_course_idx").on(table.courseId)]
 );
 
-export const refunds = sqliteTable(
+export const refundRequests = sqliteTable(
   "refunds",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
@@ -238,8 +238,8 @@ export const refunds = sqliteTable(
       .references(() => purchases.id),
     status: text("status")
       .notNull()
-      .$type<RefundStatus>()
-      .default(RefundStatus.Open),
+      .$type<RefundRequestStatus>()
+      .default(RefundRequestStatus.Open),
     // The learner's own words, in the box on the course page.
     reason: text("reason").notNull(),
     // Null until someone approves — a declined request refunds nothing.
@@ -277,7 +277,7 @@ export const teamMembers = sqliteTable("team_members", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
-export const coupons = sqliteTable("coupons", {
+export const seats = sqliteTable("coupons", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   teamId: integer("team_id")
     .notNull()
@@ -289,11 +289,11 @@ export const coupons = sqliteTable("coupons", {
   purchaseId: integer("purchase_id")
     .notNull()
     .references(() => purchases.id),
-  redeemedByUserId: integer("redeemed_by_user_id").references(() => users.id),
-  redeemedAt: text("redeemed_at"),
+  claimedByUserId: integer("redeemed_by_user_id").references(() => users.id),
+  claimedAt: text("redeemed_at"),
   // Set on every Unclaimed Seat when its Team Licence's Refund Request is
   // approved. The Seat can never be claimed after that.
-  refundedAt: text("refunded_at"),
+  refundApprovedAt: text("refunded_at"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

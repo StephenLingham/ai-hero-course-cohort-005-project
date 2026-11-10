@@ -1,7 +1,7 @@
 import { Link, isRouteErrorResponse, useSearchParams } from "react-router";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import type { Route } from "./+types/instructor.analytics";
-import { requireInstructorOrAdmin } from "~/lib/access.server";
+import { requireInstructorOrPlatformAdmin } from "~/lib/access.server";
 import {
   and,
   count,
@@ -26,7 +26,7 @@ import {
   comments,
   courseRatings,
   courses,
-  coupons,
+  seats,
   enrollments,
   lessonProgress,
   lessons,
@@ -130,7 +130,7 @@ type TopBuyer = {
   spendCents: number;
   purchaseCount: number;
   seatsBought: number;
-  seatsUnredeemed: number;
+  seatsUnclaimed: number;
   enrolled: boolean;
 };
 
@@ -252,8 +252,8 @@ function getStudentRevenue(
   // Correlated: did this purchase mint seats for other people?
   const mintedSeats = db
     .select({ one: sql`1` })
-    .from(coupons)
-    .where(eq(coupons.purchaseId, purchases.id));
+    .from(seats)
+    .where(eq(seats.purchaseId, purchases.id));
 
   const direct = db
     .select({ userId: purchases.userId, paid: sum(purchases.amountPaid) })
@@ -270,26 +270,26 @@ function getStudentRevenue(
     .all();
 
   const seatCounts = db
-    .select({ purchaseId: coupons.purchaseId, seats: count().as("seats") })
-    .from(coupons)
-    .groupBy(coupons.purchaseId)
+    .select({ purchaseId: seats.purchaseId, seats: count().as("seats") })
+    .from(seats)
+    .groupBy(seats.purchaseId)
     .as("seat_counts");
 
   const viaSeat = db
     .select({
-      userId: coupons.redeemedByUserId,
+      userId: seats.claimedByUserId,
       // Divided rather than rounded per row: the shares are summed first and
       // rounded once, so five seats out of 3333 cents still add up.
       paid: sql<number>`sum(${purchases.amountPaid} * 1.0 / ${seatCounts.seats})`,
     })
-    .from(coupons)
-    .innerJoin(purchases, eq(coupons.purchaseId, purchases.id))
+    .from(seats)
+    .innerJoin(purchases, eq(seats.purchaseId, purchases.id))
     .innerJoin(courses, eq(purchases.courseId, courses.id))
-    .innerJoin(seatCounts, eq(seatCounts.purchaseId, coupons.purchaseId))
+    .innerJoin(seatCounts, eq(seatCounts.purchaseId, seats.purchaseId))
     .where(
-      and(inArray(coupons.redeemedByUserId, studentIds), ownedBy(instructorId))
+      and(inArray(seats.claimedByUserId, studentIds), ownedBy(instructorId))
     )
-    .groupBy(coupons.redeemedByUserId)
+    .groupBy(seats.claimedByUserId)
     .all();
 
   const paidByUser = new Map<number, number>();
@@ -334,17 +334,17 @@ function getTopBuyers(
 
   const buyerIds = buyers.map((buyer) => buyer.userId);
 
-  // Seats are counted in their own query: joining coupons to purchases above
+  // Seats are counted in their own query: joining seats to purchases above
   // would repeat each purchase once per seat and multiply the spend the
   // leaderboard ranks on.
-  const seats = db
+  const buyerSeatCounts = db
     .select({
       userId: purchases.userId,
-      bought: count(coupons.id),
-      unredeemed: sql<number>`sum(case when ${coupons.redeemedByUserId} is null then 1 else 0 end)`,
+      bought: count(seats.id),
+      unclaimed: sql<number>`sum(case when ${seats.claimedByUserId} is null then 1 else 0 end)`,
     })
-    .from(coupons)
-    .innerJoin(purchases, eq(coupons.purchaseId, purchases.id))
+    .from(seats)
+    .innerJoin(purchases, eq(seats.purchaseId, purchases.id))
     .innerJoin(courses, eq(purchases.courseId, courses.id))
     .where(
       and(
@@ -355,7 +355,7 @@ function getTopBuyers(
     .groupBy(purchases.userId)
     .all();
 
-  const seatsByUser = new Map(seats.map((row) => [row.userId, row]));
+  const seatsByUser = new Map(buyerSeatCounts.map((row) => [row.userId, row]));
 
   // No range here: "never enrolled" is a fact about the person, not about the
   // last thirty days.
@@ -376,7 +376,7 @@ function getTopBuyers(
     spendCents: Number(buyer.spend ?? 0),
     purchaseCount: buyer.purchaseCount,
     seatsBought: seatsByUser.get(buyer.userId)?.bought ?? 0,
-    seatsUnredeemed: Number(seatsByUser.get(buyer.userId)?.unredeemed ?? 0),
+    seatsUnclaimed: Number(seatsByUser.get(buyer.userId)?.unclaimed ?? 0),
     enrolled: enrolled.has(buyer.userId),
   }));
 }
@@ -795,15 +795,15 @@ function getCourseRevenueByCountry(
 }
 
 export async function loader({ request, url }: Route.LoaderArgs) {
-  const { userId, isAdmin } = await requireInstructorOrAdmin(request);
+  const { userId, isPlatformAdmin } = await requireInstructorOrPlatformAdmin(request);
 
   const range = parseAnalyticsRange(url.searchParams.get("range"));
   const tab: AnalyticsTab =
     url.searchParams.get("tab") === "course" ? "course" : "overview";
 
-  // Instructors are pinned to their own figures; only an admin may look
+  // Instructors are pinned to their own figures; only a Platform Admin may look
   // elsewhere, and null means "every instructor".
-  const instructorId = isAdmin
+  const instructorId = isPlatformAdmin
     ? parseId(url.searchParams.get("instructor"))
     : userId;
 
@@ -827,7 +827,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
 
   // Unanswered questions. A question qualifies when it is top-level, not
   // deleted, not written by staff, and has no reply from the course's
-  // instructor or an admin.
+  // instructor or a Platform Admin.
   const questionsSince = rangeStart(range);
   const questionAuthor = alias(users, "author");
   const reply = alias(comments, "reply");
@@ -843,7 +843,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
         eq(reply.parentId, comments.id),
         isNull(reply.deletedAt),
         or(
-          eq(replyAuthor.role, UserRole.Admin),
+          eq(replyAuthor.role, UserRole.PlatformAdmin),
           eq(reply.userId, courses.instructorId)
         )
       )
@@ -853,7 +853,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     isNull(comments.parentId),
     isNull(comments.deletedAt),
     // Staff asking their own question shouldn't queue up as work for themselves.
-    ne(questionAuthor.role, UserRole.Admin),
+    ne(questionAuthor.role, UserRole.PlatformAdmin),
     ne(comments.userId, courses.instructorId),
     notExists(staffReply),
   ];
@@ -927,8 +927,8 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     .sort((a, b) => b.grossCents - a.grossCents);
 
   // How many people paid, and how many are learning. Deliberately two numbers:
-  // one team purchase is a single buyer covering several seats, and someone who
-  // redeems a seat enrols without a purchase row of their own.
+  // one Team Licence is a single buyer covering several seats, and someone who
+  // claims a seat enrols without a purchase row of their own.
   const buyerCountRow = db
     .select({ buyerCount: countDistinct(purchases.userId) })
     .from(purchases)
@@ -951,10 +951,10 @@ export async function loader({ request, url }: Route.LoaderArgs) {
         : Math.round(attributedRevenue / students.length),
   };
 
-  // Everyone who owns at least one course, for the admin's instructor picker.
-  // Owners rather than users with the instructor role: an admin who owns a
+  // Everyone who owns at least one course, for the Platform Admin's instructor picker.
+  // Owners rather than users with the instructor role: a Platform Admin who owns a
   // course contributes to the platform-wide total.
-  const instructors = isAdmin
+  const instructors = isPlatformAdmin
     ? db
         .selectDistinct({ id: users.id, name: users.name })
         .from(courses)
@@ -989,7 +989,7 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     ratings: getRatingSummary(instructorId, range),
     tab,
     range,
-    isAdmin,
+    isPlatformAdmin,
     instructorId,
     selectedCourseId,
     summary,
@@ -1132,11 +1132,11 @@ function TopBuyers({
                   </span>{" "}
                   <span className="text-xs text-muted-foreground">
                     bought {buyer.seatsBought},{" "}
-                    {buyer.seatsUnredeemed > 0 ? (
+                    {buyer.seatsUnclaimed > 0 ? (
                       // The prompt to chase: seats paid for that nobody is
                       // using are the most actionable thing on this table.
                       <span className="font-medium text-foreground">
-                        {buyer.seatsUnredeemed} unused
+                        {buyer.seatsUnclaimed} unclaimed
                       </span>
                     ) : (
                       "all claimed"
@@ -1505,7 +1505,7 @@ export default function InstructorAnalytics({
   const {
     tab,
     range,
-    isAdmin,
+    isPlatformAdmin,
     instructorId,
     selectedCourseId,
     summary,
@@ -1552,14 +1552,14 @@ export default function InstructorAnalytics({
         <div>
           <h1 className="text-3xl font-bold">Analytics</h1>
           <p className="mt-1 text-muted-foreground">
-            {isAdmin && instructorId === null
+            {isPlatformAdmin && instructorId === null
               ? "Revenue across every instructor on the platform."
               : "Revenue and earnings for your courses."}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {isAdmin && (
+          {isPlatformAdmin && (
             <Select
               value={instructorId === null ? "all" : String(instructorId)}
               onValueChange={(value) =>

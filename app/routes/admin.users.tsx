@@ -6,6 +6,7 @@ import type { Route } from "./+types/admin.users";
 import { getCurrentUserId } from "~/lib/session";
 import { parseFormData } from "~/lib/validation";
 import { UserRole, users } from "~/db/schema";
+import { USER_ROLE_LABELS } from "~/lib/utils";
 import { db } from "~/db";
 import { eq } from "drizzle-orm";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -84,8 +85,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const currentUser = getUserById(currentUserId);
 
-  if (!currentUser || currentUser.role !== UserRole.Admin) {
-    throw data("Only admins can access this page.", {
+  if (!currentUser || currentUser.role !== UserRole.PlatformAdmin) {
+    throw data("Only Platform Admins can access this page.", {
       status: 403,
     });
   }
@@ -103,8 +104,8 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   const currentUser = getUserById(currentUserId);
-  if (!currentUser || currentUser.role !== UserRole.Admin) {
-    throw data("Only admins can manage users.", { status: 403 });
+  if (!currentUser || currentUser.role !== UserRole.PlatformAdmin) {
+    throw data("Only Platform Admins can manage users.", { status: 403 });
   }
 
   const formData = await request.formData();
@@ -132,24 +133,24 @@ export async function action({ request }: Route.ActionArgs) {
   throw data("Invalid action.", { status: 400 });
 }
 
-function roleBadge(role: string) {
+function roleBadge(role: UserRole) {
   switch (role) {
-    case UserRole.Admin:
+    case UserRole.PlatformAdmin:
       return (
         <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
-          Admin
+          {USER_ROLE_LABELS[role]}
         </span>
       );
     case UserRole.Instructor:
       return (
         <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
-          Instructor
+          {USER_ROLE_LABELS[role]}
         </span>
       );
     case UserRole.Student:
       return (
         <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
-          Student
+          {USER_ROLE_LABELS[role]}
         </span>
       );
     default:
@@ -290,7 +291,9 @@ function EditableUserRow({
           <SelectContent>
             <SelectItem value={UserRole.Student}>Student</SelectItem>
             <SelectItem value={UserRole.Instructor}>Instructor</SelectItem>
-            <SelectItem value={UserRole.Admin}>Admin</SelectItem>
+            <SelectItem value={UserRole.PlatformAdmin}>
+              {USER_ROLE_LABELS[UserRole.PlatformAdmin]}
+            </SelectItem>
           </SelectContent>
         </Select>
       </td>
@@ -461,7 +464,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       message = typeof error.data === "string" ? error.data : "Please select a user from the DevUI panel.";
     } else if (error.status === 403) {
       title = "Access denied";
-      message = typeof error.data === "string" ? error.data : "Only admins can access this page.";
+      message = typeof error.data === "string" ? error.data : "Only Platform Admins can access this page.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;

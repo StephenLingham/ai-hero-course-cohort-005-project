@@ -17,7 +17,7 @@ import {
   LessonProgressStatus,
 } from "~/db/schema";
 import { eq, and, or, sql } from "drizzle-orm";
-import { getRefundOffer, type RefundOffer } from "~/lib/refunds.server";
+import { getRefundRequestOffer, type RefundRequestOffer } from "~/lib/refunds.server";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
@@ -394,13 +394,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let progress = 0;
   let lessonProgressMap: Record<number, string> = {};
   let nextLessonId: number | null = null;
-  let refundOffer: RefundOffer | null = null;
+  let refundRequestOffer: RefundRequestOffer | null = null;
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
 
     if (enrolled) {
-      refundOffer = getRefundOffer(db, currentUserId, course.id, new Date());
+      refundRequestOffer = getRefundRequestOffer(db, currentUserId, course.id, new Date());
 
       progress = calculateProgress(currentUserId, course.id, false);
 
@@ -444,7 +444,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     tierInfo,
     ratingSummary,
     userRating,
-    refundOffer,
+    refundRequestOffer,
   };
 }
 
@@ -545,7 +545,7 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
     tierInfo,
     ratingSummary,
     userRating,
-    refundOffer,
+    refundRequestOffer,
   } = loaderData;
   const isInstructor = currentUserId === course.instructorId;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -576,7 +576,7 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
     ? `/courses/${course.slug}/purchase`
     : `/signup?redirectTo=${encodeURIComponent(`/courses/${course.slug}/purchase`)}`;
 
-  const teamPurchaseLink = currentUserId
+  const teamLicenceLink = currentUserId
     ? `/courses/${course.slug}/purchase?mode=team`
     : `/signup?redirectTo=${encodeURIComponent(`/courses/${course.slug}/purchase?mode=team`)}`;
 
@@ -619,7 +619,7 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
         </TabsContent>
         <TabsContent value="team" forceMount>
           {priceDisplay}
-          <Link to={teamPurchaseLink}>
+          <Link to={teamLicenceLink}>
             <Button size="lg" variant="outline" className="w-full">
               Buy for Your Team
             </Button>
@@ -774,18 +774,18 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
                         </Link>
                       ) : null;
                     })()}
-                  <Link to={teamPurchaseLink}>
+                  <Link to={teamLicenceLink}>
                     <Button variant="outline" className="w-full">
                       <Users className="mr-2 size-4" />
                       Buy More Seats
                     </Button>
                   </Link>
                   <RateCourse userRating={userRating} />
-                  {refundOffer && (
+                  {refundRequestOffer && (
                     <RequestRefund
                       slug={course.slug}
-                      purchaseId={refundOffer.purchaseId}
-                      amount={refundOffer.amount}
+                      purchaseId={refundRequestOffer.purchaseId}
+                      amount={refundRequestOffer.amount}
                     />
                   )}
                 </>
@@ -898,8 +898,8 @@ function RequestRefund({
     <div className="border-t pt-4">
       <p className="mb-2 text-sm font-medium">Request a refund</p>
       <p className="mb-3 text-xs text-muted-foreground">
-        We will send {formatPrice(amount)} back to the card you paid with, once
-        someone has read your note.
+        Ask for {formatPrice(amount)} back. A Platform Admin will approve or
+        decline your refund request.
       </p>
       <fetcher.Form
         method="post"

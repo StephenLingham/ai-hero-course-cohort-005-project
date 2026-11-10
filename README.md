@@ -68,6 +68,17 @@ npm run dev
 
 The app will be running at `http://localhost:5173`. Use the floating DevUI panel to switch between users.
 
+### Domain Language
+
+Application types and screens use the terms in [GLOSSARY.md](./GLOSSARY.md):
+Platform Admin, Team Admin, Seat, Team Licence, and Refund Request. The existing
+SQLite table names (`coupons`, `refunds`), column names, stored role/status values,
+and URLs remain unchanged for compatibility.
+
+Refunds are simulated: approving a Refund Request records the full amount and
+ends the access granted by the Purchase, but does not call a payment provider.
+Approval messages describe the request decision, not a confirmed money transfer.
+
 ### What `fork` does
 
 `npx ai-hero-cli fork` turns your clone into your own repo:

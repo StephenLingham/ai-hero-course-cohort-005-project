@@ -34,7 +34,7 @@ function getTeamForAdmin(userId: number) {
     .where(
       and(
         eq(teamMembers.userId, userId),
-        eq(teamMembers.role, TeamMemberRole.Admin)
+        eq(teamMembers.role, TeamMemberRole.TeamAdmin)
       )
     )
     .get();

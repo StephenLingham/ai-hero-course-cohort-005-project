@@ -1,6 +1,6 @@
 # Keep all data in one SQLite file, reached through Drizzle
 
-Cadence runs as one server process, so its data lives in a single SQLite file (`data.db`), opened with `better-sqlite3` and queried through Drizzle ORM. SQLite needs no database server to run, back up or pay for, and `better-sqlite3` is synchronous, so a loader reads its data without a round trip. We picked Drizzle over Prisma because its queries read like the SQL they run, its schema is plain TypeScript in `app/db/schema.ts`, and it needs no separate query engine binary.
+For the current scope, Cadence is designed to run as one server process, with its data in a single SQLite file (`data.db`), opened with `better-sqlite3` and queried through Drizzle ORM. SQLite needs no database server to run, back up or pay for, and `better-sqlite3` is synchronous, so a loader reads its data without a round trip. We picked Drizzle over Prisma because its queries read like the SQL they run, its schema is plain TypeScript in `app/db/schema.ts`, and it needs no separate query engine binary.
 
 ## Considered Options
 

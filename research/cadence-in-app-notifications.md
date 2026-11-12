@@ -1,6 +1,6 @@
 # Knock evidence for Cadence's first in-app notifications
 
-**Evidence accessed: 2026-11-12.** Research for [ticket #4](https://github.com/StephenLingham/ai-hero-course-cohort-005-project/issues/4), labelled `wayfinder:research` and already assigned to StephenLingham, under [map #2](https://github.com/StephenLingham/ai-hero-course-cohort-005-project/issues/2). This is evidence, not an approved spec or provider selection.
+**Evidence accessed: 2026-11-12.** Research for [Assess Knock for Cadence's in-app notifications](https://github.com/StephenLingham/ai-hero-course-cohort-005-project/issues/4), labelled `wayfinder:research` and already assigned to StephenLingham, under [Specify Cadence's first in-app notifications](https://github.com/StephenLingham/ai-hero-course-cohort-005-project/issues/2). This is evidence, not an approved spec or provider selection.
 
 ## Scope and evidence standard
 
